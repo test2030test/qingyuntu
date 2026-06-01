@@ -117,7 +117,7 @@ function StageStatusBadge({ status, progress }: { status: Stage['status']; progr
     return (
       <span className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium pulse-glow"
         style={{ background: 'rgba(18,184,152,0.15)', color: '#12B898', border: '1px solid rgba(18,184,152,0.3)' }}>
-        <Flame size={11} /> {growthLabel}
+        <Flame size={11} /> 已解锁 · {growthLabel}
       </span>
     );
   }

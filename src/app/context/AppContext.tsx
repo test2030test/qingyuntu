@@ -143,6 +143,11 @@ function writeStoredWorkspace(workspace: PersistedWorkspace) {
 }
 
 function normalizeJourneySnapshot(snapshot: Partial<JourneySnapshot>): JourneySnapshot {
+  const normalizeStage = (stage: Stage): Stage =>
+    stage.id === 1 && stage.status === 'locked'
+      ? { ...stage, status: 'active' }
+      : stage;
+
   const normalizeResumeMaterial = (material: ResumeMaterial): ResumeMaterial => ({
     ...material,
     ...(material.position?.trim() ? {} : (() => {
@@ -161,7 +166,7 @@ function normalizeJourneySnapshot(snapshot: Partial<JourneySnapshot>): JourneySn
 
   return {
     user: snapshot.user ?? initialUser,
-    stages: snapshot.stages ?? initialStages,
+    stages: (snapshot.stages ?? initialStages).map(normalizeStage),
     dailyTasks: snapshot.dailyTasks ?? initialDailyTasks,
     dailyTaskOverrides: snapshot.dailyTaskOverrides ?? {},
     applications: snapshot.applications ?? initialApplications,
@@ -603,7 +608,7 @@ const initialStages: Stage[] = [
     subtitle: '入门实习，补空白、建节奏',
     tag: '阶段一',
     color: '#12B898',
-    status: 'locked',
+    status: 'active',
     progress: 0,
     completionReqs: ['投递≥5家', '完成1次面试复盘'],
     icon: '✓',
@@ -867,7 +872,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const workspace = readStoredWorkspace();
     if (!workspace) {
       setUser(initialUser);
-      setStages(initialStages);
+      setStages(initialStages.map(stage => ({
+        ...stage,
+        status: stage.id === 1 ? 'active' : 'locked',
+      })));
       setDailyTasks(initialDailyTasks);
       setDailyTaskOverrides({});
       setApplications(initialApplications);
@@ -891,7 +899,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     setUser(initialUser);
-    setStages(initialStages);
+    setStages(initialStages.map(stage => ({
+      ...stage,
+      status: stage.id === 1 ? 'active' : 'locked',
+    })));
     setDailyTasks(initialDailyTasks);
     setDailyTaskOverrides({});
     setApplications(initialApplications);
@@ -1119,7 +1130,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setUser(nextUser);
     setStages(initialStages.map(stage => ({
       ...stage,
-      status: 'locked',
+      status: stage.id === 1 ? 'active' : 'locked',
       progress: 0,
       currentProgress: stage.currentProgress.map(item => ({ ...item, value: 0 })),
     })));
@@ -1133,7 +1144,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       user: nextUser,
       stages: initialStages.map(stage => ({
         ...stage,
-        status: 'locked',
+        status: stage.id === 1 ? 'active' : 'locked',
         progress: 0,
         currentProgress: stage.currentProgress.map(item => ({ ...item, value: 0 })),
       })),
