@@ -272,9 +272,10 @@ interface AddAppForm {
 }
 
 export function Inn() {
-  const { applications, updateApplicationStatus, addApplication, resumeEntries } = useApp();
+  const { applications, updateApplicationStatus, addApplication, resumeEntries, editApplication } = useApp();
   const [previewEntry, setPreviewEntry] = useState<ResumeEntry | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<Application['status'] | 'all'>('all');
   const [sortByDate, setSortByDate] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -311,8 +312,12 @@ export function Inn() {
 
   const saveEdit = () => {
     if (!editModal) return;
-    // In a real app, we'd update the application. For now, we can store locally.
-    // We'll just close the modal since addApplication doesn't support updating fields
+    // persist edited fields to the application
+    editApplication(editModal.appId, {
+      location: editValues.location,
+      salary: editValues.salary,
+      appliedDate: editValues.appliedDate,
+    });
     setEditModal(null);
   };
 
@@ -325,7 +330,13 @@ export function Inn() {
 
   const openResumePreview = (resumeVersionId?: string) => {
     const entry = resumeEntries.find(r => r.id === resumeVersionId) ?? resumeEntries.find(r => r.isDefault) ?? resumeEntries[0] ?? null;
-    if (!entry) return;
+    if (!entry) {
+      setPreviewEntry(null);
+      setPreviewNotice('当前没有可预览的简历版本，请先在简历库创建或设置一个默认版本。');
+      setShowPreviewModal(true);
+      return;
+    }
+    setPreviewNotice(null);
     setPreviewEntry(entry);
     setShowPreviewModal(true);
   };
@@ -360,14 +371,28 @@ export function Inn() {
         transition={{ type: 'spring', stiffness: 300, damping: 28 }}
         className="mb-6"
       >
-        <div className="flex items-center gap-2 mb-1">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center"
-            style={{ background: 'linear-gradient(135deg, #F59E0B, #FCD34D)' }}>
-            <Building2 size={16} color="white" />
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center"
+              style={{ background: 'linear-gradient(135deg, #F59E0B, #FCD34D)' }}>
+              <Building2 size={16} color="white" />
+            </div>
+            <div>
+              <h1 className="text-gray-800">青云驿馆</h1>
+              <p className="text-sm text-gray-500">实习投递管家</p>
+            </div>
           </div>
-          <h1 className="text-gray-800">青云驿馆</h1>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-medium"
+              style={{ background: 'linear-gradient(135deg, #12B898, #2AC59D)', color: 'white' }}
+            >
+              <Plus size={14} /> 添加新投递
+            </button>
+          </div>
         </div>
-        <p className="text-sm text-gray-500 ml-10">实习投递管家</p>
       </motion.div>
 
       {/* Summary cards — only 3 positive stats */}
@@ -602,7 +627,7 @@ export function Inn() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showPreviewModal && previewEntry && (
+        {showPreviewModal && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -625,19 +650,31 @@ export function Inn() {
                   <X size={18} style={{ color: '#9CA3AF' }} />
                 </button>
               </div>
-              <div className="text-xs text-gray-400 mb-4">{previewEntry.company} · {previewEntry.position}</div>
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium mb-4" style={{ background: 'rgba(18,184,152,0.1)', color: '#12B898' }}>
-                <FileText size={10} /> {previewEntry.isDefault ? '默认投递版本' : `版本 V${previewEntry.version ?? 1}`}
-              </div>
-              <div className="text-sm text-gray-700 space-y-2 max-h-72 overflow-auto">
-                <div>公司：{previewEntry.company}</div>
-                <div>岗位：{previewEntry.position}</div>
-                <div>阶段：{previewEntry.stage}</div>
-                <div>技能：{previewEntry.skills.join(' / ') || '暂无'}</div>
-                <div className="pt-2 border-t border-gray-100">
-                  {previewEntry.bullets.map((b, i) => <div key={i} className="mb-1">• {b}</div>)}
+
+              {!previewEntry ? (
+                <div className="rounded-2xl p-4 mt-2" style={{ background: 'rgba(248,250,252,0.9)', border: '1px solid rgba(226,232,240,0.9)' }}>
+                  <div className="text-sm font-medium text-gray-700 mb-1">暂无可预览内容</div>
+                  <div className="text-xs text-gray-500 leading-relaxed">
+                    {previewNotice ?? '当前投递记录没有绑定有效简历版本。'}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <>
+                  <div className="text-xs text-gray-400 mb-4">{previewEntry.company} · {previewEntry.position}</div>
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium mb-4" style={{ background: 'rgba(18,184,152,0.1)', color: '#12B898' }}>
+                    <FileText size={10} /> {previewEntry.isDefault ? '默认投递版本' : `版本 V${previewEntry.version ?? 1}`}
+                  </div>
+                  <div className="text-sm text-gray-700 space-y-2 max-h-72 overflow-auto">
+                    <div>公司：{previewEntry.company}</div>
+                    <div>岗位：{previewEntry.position}</div>
+                    <div>阶段：{previewEntry.stage}</div>
+                    <div>技能：{previewEntry.skills.join(' / ') || '暂无'}</div>
+                    <div className="pt-2 border-t border-gray-100">
+                      {previewEntry.bullets.map((b, i) => <div key={i} className="mb-1">• {b}</div>)}
+                    </div>
+                  </div>
+                </>
+              )}
             </motion.div>
           </motion.div>
         )}

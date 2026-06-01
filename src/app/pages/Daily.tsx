@@ -50,13 +50,12 @@ interface TaskEditState {
 }
 
 export function Daily() {
-  const { user, dailyTasks, completeTask, setXiaoYunMessage, questions, toggleQuestion, achievements } = useApp();
+  const { user, dailyTasks, dailyTaskOverrides, updateDailyTaskOverride, completeTask, setXiaoYunMessage, questions, toggleQuestion, achievements } = useApp();
   const [confettiKey, setConfettiKey] = useState(0);
   const [justCompleted, setJustCompleted] = useState<string | null>(null);
 
   // Task editing state
   const [editState, setEditState] = useState<TaskEditState>({ taskId: null, name: '', content: '' });
-  const [customTasks, setCustomTasks] = useState<Record<string, { title: string; description: string }>>({});
 
   // Interview practice state
   const [selectedCategory, setSelectedCategory] = useState('全部');
@@ -85,15 +84,12 @@ export function Daily() {
 
   const saveEdit = () => {
     if (!editState.taskId) return;
-    setCustomTasks(prev => ({
-      ...prev,
-      [editState.taskId!]: { title: editState.name, description: editState.content },
-    }));
+    updateDailyTaskOverride(editState.taskId, { title: editState.name, description: editState.content });
     setEditState({ taskId: null, name: '', content: '' });
   };
 
   const getTaskDisplay = (task: typeof dailyTasks[0]) => {
-    const custom = customTasks[task.id];
+    const custom = dailyTaskOverrides[task.id];
     return {
       title: custom?.title ?? task.title,
       description: custom?.description ?? task.description,

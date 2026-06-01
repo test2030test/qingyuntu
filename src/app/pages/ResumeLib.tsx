@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   FileText, Plus, ChevronDown, Star, Sparkles,
@@ -11,13 +10,26 @@ import type { ResumeEntry } from '../context/AppContext';
 import type { ResumeMaterial } from '../services/ai';
 
 export function ResumeLib() {
-  const { resumeMaterials, resumeEntries, stages, user, setDefaultResumeVersion, generateResumeVersion } = useApp();
-  const navigate = useNavigate();
+  const { resumeMaterials, resumeEntries, stages, user, generateResumeVersion, updateResumeMaterial, addResumeMaterial } = useApp();
   const [expandedEntry, setExpandedEntry] = useState<string | null>(null);
   const [activeVersion, setActiveVersion] = useState('v1');
   const [activeTab, setActiveTab] = useState<'entries' | 'versions' | 'growth'>('entries');
   const [previewEntry, setPreviewEntry] = useState<null | ResumeEntry>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [editMaterialIndex, setEditMaterialIndex] = useState<number | null>(null);
+  const [editMaterialTitle, setEditMaterialTitle] = useState('');
+  const [editMaterialDetail, setEditMaterialDetail] = useState('');
+  const [editMaterialSkills, setEditMaterialSkills] = useState('');
+  const [showEditMaterialModal, setShowEditMaterialModal] = useState(false);
+  const [showAddMaterialModal, setShowAddMaterialModal] = useState(false);
+  const [newMaterial, setNewMaterial] = useState({
+    company: '',
+    position: '',
+    startDate: new Date().toISOString().slice(0, 10),
+    endDate: '',
+    status: '已投递',
+    detail: '',
+  });
 
   const activeStage = stages.find(stage => stage.status === 'active') ?? stages[0];
   
@@ -30,7 +42,6 @@ export function ResumeLib() {
       stage: entry.stage,
       description: `${entry.company} · ${entry.skills.slice(0, 2).join(' / ')}`,
       sourceType: entry.sourceType,
-      isDefault: !!entry.isDefault,
     }))
     : [{
       id: 'v1',
@@ -39,25 +50,71 @@ export function ResumeLib() {
       stage: 1,
       description: '先完成资料填写，青云简牍会自动生成第一版内容',
       sourceType: 'seed',
-      isDefault: true,
     }];
 
   const growthItems = [
     { label: '简历经历数', before: Math.max(resumeMaterials.length - 1, 0), after: resumeMaterials.length, unit: '条', color: '#12B898' },
     { label: '当前阶段', before: Math.max(activeStage?.id ?? 1 - 1, 0), after: activeStage?.id ?? 1, unit: '阶段', color: '#8B5CF6' },
-    { label: '目标岗位', before: user.hasSetup ? 0 : 1, after: user.targetJob ? 1 : 0, unit: '个', color: '#F59E0B' },
+    { label: 'JD匹配度', before: 0, after: user.matchScore, unit: '%', color: '#F59E0B' },
   ];
 
   const xiaoYunMessage = resumeMaterials.length === 0
     ? '先完成一次 AI 分析，简牍会生成你的 v1.0 初始简历。'
     : `当前已有 ${resumeMaterials.length} 条经历素材，点击“生成新版本简历”可把它们整理成新版本。`;
 
-  const getDefaultEntry = () => resumeEntries.find(e => e.isDefault) ?? resumeEntries[0] ?? null;
+  const formatMaterialPeriod = (material: ResumeMaterial) => {
+    const start = material.startDate ?? material.date ?? '';
+    if (!start) return '';
+    return `${start} - ${material.endDate?.trim() || '至今'}`;
+  };
 
   const previewResume = (entry: ResumeEntry | null) => {
     if (!entry) return;
     setPreviewEntry(entry);
     setShowPreviewModal(true);
+  };
+
+  const openEditMaterial = (index: number) => {
+    const mat = resumeMaterials[index];
+    if (!mat) return;
+    setEditMaterialIndex(index);
+    setEditMaterialTitle(mat.title);
+    setEditMaterialDetail(mat.detail);
+    setEditMaterialSkills(mat.skills.join(', '));
+    setShowEditMaterialModal(true);
+  };
+
+  const saveEditMaterial = () => {
+    if (editMaterialIndex === null) return;
+    const skills = editMaterialSkills.split(',').map(s => s.trim()).filter(Boolean).slice(0, 3);
+    updateResumeMaterial(editMaterialIndex, {
+      title: editMaterialTitle.trim() || `素材 ${editMaterialIndex + 1}`,
+      detail: editMaterialDetail.trim(),
+      skills,
+    });
+    setShowEditMaterialModal(false);
+    setEditMaterialIndex(null);
+  };
+
+  const saveNewMaterial = () => {
+    if (!newMaterial.company.trim() || !newMaterial.position.trim() || !newMaterial.detail.trim()) return;
+    addResumeMaterial({
+      title: newMaterial.company.trim(),
+      position: newMaterial.position.trim(),
+      detail: newMaterial.detail.trim(),
+      skills: [newMaterial.status],
+      startDate: newMaterial.startDate.trim() || undefined,
+      endDate: newMaterial.endDate.trim() || undefined,
+    });
+    setShowAddMaterialModal(false);
+    setNewMaterial({
+      company: '',
+      position: '',
+      startDate: new Date().toISOString().slice(0, 10),
+      endDate: '',
+      status: '已投递',
+      detail: '',
+    });
   };
 
   const downloadResume = (entry: ResumeEntry | null) => {
@@ -95,18 +152,6 @@ export function ResumeLib() {
         </div>
         
         <p className="text-sm text-gray-500 ml-10">简历素材库与成长可视化</p>
-        <div className="ml-4 mt-2 flex gap-2">
-          <button
-            onClick={() => previewResume(getDefaultEntry())}
-            className="text-xs px-2 py-1 rounded-lg"
-            style={{ background: 'rgba(18,184,152,0.06)', color: '#12B898' }}
-          >预览默认版本</button>
-          <button
-            onClick={() => downloadResume(getDefaultEntry())}
-            className="text-xs px-2 py-1 rounded-lg"
-            style={{ background: 'rgba(59,130,246,0.06)', color: '#3B82F6' }}
-          >下载默认版本</button>
-        </div>
       </motion.div>
 
       {/* Growth banner */}
@@ -227,11 +272,15 @@ export function ResumeLib() {
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-semibold text-sm text-gray-800">{material.title}</span>
                             </div>
-                            <div className="text-xs text-gray-500 mt-0.5">来自 AI 从简历中提取的经历素材</div>
+                            <div className="text-xs text-gray-500 mt-0.5">{material.position ?? '职位未填写'}</div>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 text-xs text-gray-400 flex-shrink-0">
-                          <Calendar size={10} /> 素材 {index + 1}
+                        <div className="flex items-center gap-1 text-xs text-gray-400 flex-shrink-0 min-h-4">
+                          {formatMaterialPeriod(material) ? (
+                            <>
+                              <Calendar size={10} /> {formatMaterialPeriod(material)}
+                            </>
+                          ) : null}
                         </div>
                       </div>
 
@@ -260,14 +309,18 @@ export function ResumeLib() {
                                   <span className="leading-relaxed">{material.detail}</span>
                               </div>
                             </div>
-                            <div className="flex gap-2 mt-3">
-                              <button className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs" style={{ background: 'rgba(18,184,152,0.08)', color: '#12B898' }}>
-                                <Edit3 size={11} /> 作为素材
-                              </button>
-                              <button className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs" style={{ background: 'rgba(139,92,246,0.08)', color: '#8B5CF6' }}>
-                                <Sparkles size={11} /> 等待生成新版
-                              </button>
-                            </div>
+                                                    <div className="flex gap-2 mt-3">
+                                                      <button
+                                                        onClick={(e) => { e.stopPropagation(); openEditMaterial(index); }}
+                                                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs"
+                                                        style={{ background: 'rgba(18,184,152,0.08)', color: '#12B898' }}
+                                                      >
+                                                        <Edit3 size={11} /> 优化文案
+                                                      </button>
+                                                      <button className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs" style={{ background: 'rgba(139,92,246,0.08)', color: '#8B5CF6' }}>
+                                                        <Sparkles size={11} /> 等待生成新版
+                                                      </button>
+                                                    </div>
                           </div>
                         </motion.div>
                       )}
@@ -275,8 +328,55 @@ export function ResumeLib() {
                   </motion.div>
                 ))}
 
+                <AnimatePresence>
+                  {showEditMaterialModal && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+                      style={{ background: 'rgba(0,0,0,0.3)', backdropFilter: 'blur(4px)' }}
+                      onClick={e => e.target === e.currentTarget && setShowEditMaterialModal(false)}
+                    >
+                      <motion.div
+                        initial={{ scale: 0.95, y: 10, opacity: 0 }}
+                        animate={{ scale: 1, y: 0, opacity: 1 }}
+                        exit={{ scale: 0.95, y: 10, opacity: 0 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                        className="w-full max-w-lg rounded-2xl p-5"
+                        style={{ background: 'white', boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}
+                      >
+                        <div className="flex items-center justify-between mb-4">
+                          <span className="font-semibold text-gray-800">编辑素材</span>
+                          <button onClick={() => setShowEditMaterialModal(false)} className="text-gray-400">取消</button>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div>
+                            <div className="text-xs text-gray-500 mb-1.5">标题</div>
+                            <input value={editMaterialTitle} onChange={e => setEditMaterialTitle(e.target.value)} className="w-full text-sm px-3 py-2.5 rounded-xl outline-none" />
+                          </div>
+                          <div>
+                            <div className="text-xs text-gray-500 mb-1.5">内容</div>
+                            <textarea value={editMaterialDetail} onChange={e => setEditMaterialDetail(e.target.value)} rows={4} className="w-full text-sm px-3 py-2.5 rounded-xl outline-none resize-none" />
+                          </div>
+                          <div>
+                            <div className="text-xs text-gray-500 mb-1.5">技能标签（用逗号分隔）</div>
+                            <input value={editMaterialSkills} onChange={e => setEditMaterialSkills(e.target.value)} className="w-full text-sm px-3 py-2.5 rounded-xl outline-none" />
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex gap-2">
+                          <button onClick={() => setShowEditMaterialModal(false)} className="flex-1 py-2.5 rounded-xl text-sm font-medium" style={{ background: 'rgba(226,232,240,0.6)', color: '#6B7280' }}>取消</button>
+                          <button onClick={saveEditMaterial} className="flex-1 py-2.5 rounded-xl text-sm font-medium text-white" style={{ background: 'linear-gradient(135deg, #12B898, #2AC59D)' }}>保存</button>
+                        </div>
+                      </motion.div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 <motion.button
-                  onClick={() => navigate('/inn')}
+                  onClick={() => setShowAddMaterialModal(true)}
                   className="w-full py-3 rounded-2xl flex items-center justify-center gap-2 text-sm"
                   style={{
                     border: '1.5px dashed rgba(226,232,240,0.8)',
@@ -289,6 +389,75 @@ export function ResumeLib() {
                 >
                   <Plus size={15} /> 录入新经历
                 </motion.button>
+
+                <AnimatePresence>
+                  {showAddMaterialModal && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+                      style={{ background: 'rgba(0,0,0,0.3)', backdropFilter: 'blur(4px)' }}
+                      onClick={e => e.target === e.currentTarget && setShowAddMaterialModal(false)}
+                    >
+                      <motion.div
+                        initial={{ scale: 0.95, y: 10, opacity: 0 }}
+                        animate={{ scale: 1, y: 0, opacity: 1 }}
+                        exit={{ scale: 0.95, y: 10, opacity: 0 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                        className="w-full max-w-lg rounded-2xl p-5"
+                        style={{ background: 'white', boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}
+                      >
+                        <div className="flex items-center justify-between mb-4">
+                          <span className="font-semibold text-gray-800">录入新经历</span>
+                          <button onClick={() => setShowAddMaterialModal(false)} className="text-gray-400">取消</button>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <div className="text-xs text-gray-500 mb-1.5">公司</div>
+                              <input value={newMaterial.company} onChange={e => setNewMaterial(s => ({ ...s, company: e.target.value }))} className="w-full text-sm px-3 py-2.5 rounded-xl outline-none" />
+                            </div>
+                            <div>
+                              <div className="text-xs text-gray-500 mb-1.5">职位</div>
+                              <input value={newMaterial.position} onChange={e => setNewMaterial(s => ({ ...s, position: e.target.value }))} className="w-full text-sm px-3 py-2.5 rounded-xl outline-none" />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <div className="text-xs text-gray-500 mb-1.5">开始时间</div>
+                              <input type="date" value={newMaterial.startDate} onChange={e => setNewMaterial(s => ({ ...s, startDate: e.target.value }))} className="w-full text-sm px-3 py-2.5 rounded-xl outline-none" />
+                            </div>
+                            <div>
+                              <div className="text-xs text-gray-500 mb-1.5">结束时间</div>
+                              <input type="date" value={newMaterial.endDate} onChange={e => setNewMaterial(s => ({ ...s, endDate: e.target.value }))} className="w-full text-sm px-3 py-2.5 rounded-xl outline-none" />
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-gray-500 mb-1.5">状态</div>
+                            <select value={newMaterial.status} onChange={e => setNewMaterial(s => ({ ...s, status: e.target.value }))} className="w-full text-sm px-3 py-2.5 rounded-xl outline-none">
+                                <option value="已投递">已投递</option>
+                                <option value="已查看">已查看</option>
+                                <option value="已面试">已面试</option>
+                                <option value="已拿到offer">已拿到offer</option>
+                                <option value="已结束">已结束</option>
+                              </select>
+                          </div>
+                          <div>
+                            <div className="text-xs text-gray-500 mb-1.5">经历内容</div>
+                            <textarea value={newMaterial.detail} onChange={e => setNewMaterial(s => ({ ...s, detail: e.target.value }))} rows={4} className="w-full text-sm px-3 py-2.5 rounded-xl outline-none resize-none" />
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex gap-2">
+                          <button onClick={() => setShowAddMaterialModal(false)} className="flex-1 py-2.5 rounded-xl text-sm font-medium" style={{ background: 'rgba(226,232,240,0.6)', color: '#6B7280' }}>取消</button>
+                          <button onClick={saveNewMaterial} className="flex-1 py-2.5 rounded-xl text-sm font-medium text-white" style={{ background: 'linear-gradient(135deg, #12B898, #2AC59D)' }}>保存</button>
+                        </div>
+                      </motion.div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             )}
           </motion.div>
@@ -341,7 +510,7 @@ export function ResumeLib() {
                         <div className="font-semibold text-sm text-gray-800">{ver.label}</div>
                         <div className="text-xs text-gray-400">{ver.description}</div>
                         <div className="text-xs text-gray-400 mt-1">
-                          来源：{ver.sourceType === 'seed' ? '上传初始' : '生成版本'} {ver.isDefault ? ' · 默认版本' : ''}
+                          来源：{ver.sourceType === 'seed' ? '上传初始' : '生成版本'}
                         </div>
                       </div>
                     </div>
@@ -368,13 +537,6 @@ export function ResumeLib() {
                             style={{ background: 'rgba(245,158,11,0.1)', color: '#F59E0B' }}>
                             <Download size={12} /> 下载
                           </button>
-                      {!ver.isDefault && (
-                        <button
-                          onClick={() => setDefaultResumeVersion && setDefaultResumeVersion(ver.id)}
-                          className="px-4 py-2 rounded-xl text-xs font-medium"
-                          style={{ background: 'rgba(18,184,152,0.08)', color: '#12B898' }}
-                        >设为默认</button>
-                      )}
                     </div>
                   )}
                 </motion.div>

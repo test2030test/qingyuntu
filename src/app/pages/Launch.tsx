@@ -214,7 +214,7 @@ async function extractWordResumeText(file: File): Promise<string> {
   return result.value.trim();
 }
 
-function AnalyzingAnimation({ completedCount }: { completedCount: number }) {
+function AnalyzingAnimation({ activeIndex }: { activeIndex: number }) {
   return (
     <div className="py-16 flex flex-col items-center gap-6">
       <div className="relative">
@@ -231,14 +231,13 @@ function AnalyzingAnimation({ completedCount }: { completedCount: number }) {
       </div>
 
       <div className="text-center">
-        <div className="font-semibold text-gray-800 mb-1">AI正在分析你的能力结构...</div>
-        <div className="text-sm text-gray-500">识别优势能力 · 构建能力画像 · 生成成长路径</div>
+        <div className="font-semibold text-gray-800 mb-1">AI正在整理你的信息...</div>
+        <div className="text-sm text-gray-500">正在综合简历、岗位与画像，稍后会直接给出结果</div>
       </div>
 
       <div className="space-y-2 w-full max-w-xs">
         {ANALYZE_CHECKS.map((step, i) => {
-          const done = i < completedCount;
-          const active = i === completedCount && completedCount < ANALYZE_CHECKS.length;
+          const active = i === activeIndex;
           return (
           <motion.div
             key={step}
@@ -248,21 +247,17 @@ function AnalyzingAnimation({ completedCount }: { completedCount: number }) {
             className="flex items-center gap-2.5 text-sm"
           >
             <div className="w-4 h-4 flex items-center justify-center">
-              {done ? (
-                <CheckCircle2 size={16} style={{ color: '#12B898' }} />
-              ) : (
-                <motion.div
-                  className="w-3 h-3 rounded-full"
-                  style={{
-                    border: active ? '2px solid #12B898' : '2px solid rgba(156,163,175,0.45)',
-                    borderTopColor: active ? '#2AC59D' : 'rgba(156,163,175,0.45)',
-                  }}
-                  animate={active ? { rotate: 360 } : { rotate: 0 }}
-                  transition={active ? { repeat: Infinity, duration: 1.1, ease: 'linear' } : { duration: 0 }}
-                />
-              )}
+              <motion.div
+                className="w-3 h-3 rounded-full"
+                style={{
+                  background: active ? '#12B898' : 'rgba(156,163,175,0.28)',
+                  boxShadow: active ? '0 0 0 4px rgba(18,184,152,0.14)' : 'none',
+                }}
+                animate={active ? { scale: [1, 1.18, 1] } : { scale: 1 }}
+                transition={active ? { repeat: Infinity, duration: 1.2, ease: 'easeInOut' } : { duration: 0 }}
+              />
             </div>
-            <span className={done || active ? 'text-gray-700' : 'text-gray-400'}>{step}</span>
+            <span className={active ? 'text-gray-700' : 'text-gray-400'}>{step}</span>
           </motion.div>
           );
         })}
@@ -618,7 +613,7 @@ function PlanStep({
 
 export function Launch() {
   const navigate = useNavigate();
-  const { user, setHasSetup, setXiaoYunMessage, applyPlan, seedResumeLibrary } = useApp();
+  const { user, setHasSetup, setXiaoYunMessage, applyPlan, seedResumeLibrary, updateUser } = useApp();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastFileRef = useRef<File | null>(null);
   const analysisAbortRef = useRef<AbortController | null>(null);
@@ -642,7 +637,7 @@ export function Launch() {
   const [rawAiResponse, setRawAiResponse] = useState('');
   const [showRawResponse, setShowRawResponse] = useState(false);
   const [wordCloudItems, setWordCloudItems] = useState<WordCloudItem[]>(DEFAULT_WORD_CLOUD_ITEMS);
-  const [analyzingCompletedCount, setAnalyzingCompletedCount] = useState(0);
+  const [analysisPulseIndex, setAnalysisPulseIndex] = useState(0);
   const [resumeMaterials, setResumeMaterials] = useState<ResumeMaterial[]>([]);
 
   const handleCancelAnalysis = () => {
@@ -658,18 +653,15 @@ export function Launch() {
     }
 
     setStep('analyzing');
-    setAnalyzingCompletedCount(0);
+    setAnalysisPulseIndex(0);
 
     analysisAbortRef.current?.abort();
     const controller = new AbortController();
     analysisAbortRef.current = controller;
 
     let progressTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
-      setAnalyzingCompletedCount(prev => {
-        const maxPreviewDone = ANALYZE_CHECKS.length - 1;
-        return prev < maxPreviewDone ? prev + 1 : prev;
-      });
-    }, 1200);
+      setAnalysisPulseIndex(prev => (prev + 1) % ANALYZE_CHECKS.length);
+    }, 1100);
 
     try {
       const [aiResult, extractionResult] = await Promise.all([
@@ -689,6 +681,7 @@ export function Launch() {
       setResumeMaterials(extractionResult.materials);
 
       setAiEncouragement(aiResult.encouragement);
+      updateUser({ matchScore: aiResult.matchScore });
       setGrowthDimensions(aiResult.dimensions);
       setWordCloudItems(buildWordCloudItems(aiResult.dimensions, aiResult.suggestions));
       setRawAiResponse(aiResult.raw ?? '');
@@ -704,7 +697,6 @@ export function Launch() {
         clearInterval(progressTimer);
         progressTimer = null;
       }
-      setAnalyzingCompletedCount(ANALYZE_CHECKS.length);
       await wait(320);
 
       setStep('result');
@@ -719,7 +711,7 @@ export function Launch() {
       }
       const message = error instanceof Error ? error.message : 'AI 分析失败，请稍后重试。';
       setStep('resume');
-      setAnalyzingCompletedCount(0);
+      setAnalysisPulseIndex(0);
     } finally {
       if (analysisAbortRef.current === controller) {
         analysisAbortRef.current = null;
@@ -1153,7 +1145,7 @@ export function Launch() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <AnalyzingAnimation completedCount={analyzingCompletedCount} />
+            <AnalyzingAnimation activeIndex={analysisPulseIndex} />
             <div className="mt-4 flex items-center justify-between gap-3">
               <div className="text-xs text-gray-500">正在分析 JD 与简历，可随时取消并返回上一步。</div>
               <button

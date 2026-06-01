@@ -24,13 +24,18 @@ export interface AiLaunchAnalysis {
   encouragement: string;
   suggestions: AiSuggestion[];
   dimensions: AiDimension[];
+  matchScore: number;
   raw?: string;
 }
 
 export interface ResumeMaterial {
   title: string;
+  position?: string;
   detail: string;
   skills: string[];
+  startDate?: string;
+  endDate?: string;
+  date?: string;
 }
 
 export interface ResumeMaterialExtraction {
@@ -167,6 +172,28 @@ function buildFallbackDimensions(suggestions: AiSuggestion[]): AiDimension[] {
   ];
 }
 
+function normalizeMatchScore(value: unknown, dimensions: AiDimension[], suggestions: AiSuggestion[]): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (Number.isFinite(numeric)) {
+    return Math.min(100, Math.max(0, Math.round(numeric)));
+  }
+
+  const levelScore: Record<AiDimensionLevel, number> = {
+    优: 92,
+    良: 76,
+    中: 60,
+    待提升: 42,
+  };
+
+  const dimensionItems = dimensions.flatMap(dimension => dimension.items);
+  const dimensionScore = dimensionItems.length > 0
+    ? Math.round(dimensionItems.reduce((sum, item) => sum + levelScore[item.level], 0) / dimensionItems.length)
+    : 58;
+
+  const suggestionBonus = Math.min(12, suggestions.filter(item => item.priority !== '优先').length * 3);
+  return Math.min(100, Math.max(0, dimensionScore + suggestionBonus));
+}
+
 function buildLocalResumeMaterials(resumeText: string): ResumeMaterial[] {
   const lines = resumeText
     .split(/\r?\n/)
@@ -208,6 +235,7 @@ export async function analyzeCareerPathWithAI(input: AnalyzeInput, options: Requ
     'JSON 格式如下：',
     '{',
     '  "encouragement": "string",',
+    '  "matchScore": 0,',
     '  "dimensions": [',
     '    { "label": "string", "icon": "string", "items": [ { "name": "string", "level": "优|良|中|待提升", "desc": "string" } ] }',
     '  ],',
@@ -298,6 +326,8 @@ export async function analyzeCareerPathWithAI(input: AnalyzeInput, options: Requ
       .filter((dimension: AiDimension) => dimension.items.length > 0)
     : buildFallbackDimensions(suggestions);
 
+  const normalizedMatchScore = normalizeMatchScore(parsed?.matchScore, dimensions, suggestions);
+
   if (!encouragement || suggestions.length === 0) {
     throw new Error('AI 返回内容不完整，请重试；如果一直失败，可改用更大的模型或稍后再试。');
   }
@@ -306,6 +336,7 @@ export async function analyzeCareerPathWithAI(input: AnalyzeInput, options: Requ
     encouragement,
     suggestions,
     dimensions: dimensions.length > 0 ? dimensions : buildFallbackDimensions(suggestions),
+    matchScore: normalizedMatchScore,
     raw: content,
   };
 }

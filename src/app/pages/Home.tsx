@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   TrendingUp, CheckCircle2, Lock, Flame, Star,
   ChevronRight, Zap, Building2, ArrowUp, Map,
-  Target, Calendar, Award, Sparkles, Pencil
+  Target, Calendar, Award, Sparkles, Pencil,
+  Download, Users
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { Stage } from '../context/AppContext';
@@ -79,19 +80,14 @@ function CloudIcon({ size = 24, color = '#12B898' }: { size?: number; color?: st
 
 // Growth stage labels replacing percentages
 const GROWTH_STAGES = ['初步建立', '持续成长', '优势形成'];
-const MATCH_STAGES = ['探索中', '积累中', '提升中', '成型中'];
-
 function getGrowthStage(progress: number): string {
   if (progress >= 70) return '优势形成';
   if (progress >= 35) return '持续成长';
   return '初步建立';
 }
 
-function getMatchStage(score: number): string {
-  if (score >= 80) return '成型中';
-  if (score >= 65) return '提升中';
-  if (score >= 45) return '积累中';
-  return '探索中';
+function formatJdMatchScore(score: number): string {
+  return `JD匹配度 ${Math.max(0, Math.min(100, Math.round(score)))}%`;
 }
 
 function GrowthStageBadge({ label, color }: { label: string; color: string }) {
@@ -368,9 +364,10 @@ function StageCard({ stage, index, isExpanded, onToggle, onUpdateProgress }: {
 }
 
 export function Home() {
-  const { user, stages, dailyTasks, applications, achievements, savedAccounts, loadAccount, resetCurrentAccount, updateStageProgress, initializeJourney } = useApp();
+  const { user, stages, dailyTasks, applications, achievements, savedAccounts, loadAccount, resetCurrentAccount, exportCurrentAccount, updateStageProgress, initializeJourney } = useApp();
   const navigate = useNavigate();
   const [expandedStage, setExpandedStage] = useState<number | null>(2);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [profileDraft, setProfileDraft] = useState({
     name: user.name,
     targetJob: user.targetJob,
@@ -500,7 +497,21 @@ export function Home() {
 
   const activeApps = applications.filter(a => ['applied', 'viewed', 'interview'].includes(a.status)).length;
   const overallGrowthLabel = getGrowthStage(overallProgress);
-  const matchLabel = getMatchStage(user.matchScore);
+  const matchLabel = formatJdMatchScore(user.matchScore);
+
+  const handleExportAccount = () => {
+    const payload = exportCurrentAccount();
+    if (!payload) return;
+
+    const blob = new Blob([payload.content], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = payload.fileName;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setShowAccountMenu(false);
+  };
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
@@ -533,14 +544,71 @@ export function Home() {
               <Star size={14} />
               <span className="text-sm font-semibold">{user.xp} XP</span>
             </motion.div>
-            <button
-              onClick={resetCurrentAccount}
-              className="px-3 py-1.5 rounded-xl text-xs font-medium"
-              style={{ background: 'rgba(148,163,184,0.1)', color: '#64748B' }}
-              title="清空当前账号并重新开始"
-            >
-              重开账号
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowAccountMenu(v => !v)}
+                className="px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5"
+                style={{ background: 'rgba(59,130,246,0.1)', color: '#3B82F6' }}
+                title="切换账号或导出当前账号"
+              >
+                <Users size={13} /> 账号
+              </button>
+
+              <AnimatePresence>
+                {showAccountMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: -6 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: -6 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                    className="absolute right-0 top-11 z-30 w-56 rounded-2xl p-2"
+                    style={{ background: 'rgba(255,255,255,0.96)', boxShadow: '0 10px 30px rgba(15,23,42,0.12)', border: '1px solid rgba(148,163,184,0.18)' }}
+                  >
+                    <div className="px-3 py-2 border-b border-gray-100 mb-1">
+                      <div className="text-xs text-gray-400">当前账号</div>
+                      <div className="text-sm font-semibold text-gray-800 truncate">{user.name}</div>
+                    </div>
+
+                    <div className="px-3 py-1.5 text-[11px] text-gray-400">切换账号</div>
+                    <div className="space-y-1 max-h-44 overflow-auto pr-1">
+                      {savedAccounts.length > 0 ? savedAccounts.map(accountName => (
+                        <button
+                          key={accountName}
+                          onClick={() => {
+                            loadAccount(accountName);
+                            setShowAccountMenu(false);
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-xl text-sm transition-colors"
+                          style={{ background: accountName === user.name ? 'rgba(18,184,152,0.1)' : 'transparent', color: accountName === user.name ? '#12B898' : '#374151' }}
+                        >
+                          {accountName}
+                        </button>
+                      )) : (
+                        <div className="px-3 py-2 text-xs text-gray-400">暂无可切换账号</div>
+                      )}
+                    </div>
+
+                    <div className="border-t border-gray-100 mt-2 pt-2 space-y-1">
+                      <button
+                        onClick={handleExportAccount}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-gray-700 hover:bg-blue-50 transition-colors"
+                      >
+                        <Download size={14} style={{ color: '#3B82F6' }} /> 导出当前账号
+                      </button>
+                      <button
+                        onClick={() => {
+                          resetCurrentAccount();
+                          setShowAccountMenu(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        <Target size={14} style={{ color: '#64748B' }} /> 重开账号
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </div>
       </motion.div>
@@ -568,7 +636,7 @@ export function Home() {
           <div className="flex flex-col items-end gap-2">
             <GrowthStageBadge label={overallGrowthLabel} color="#12B898" />
             <div className="flex items-center gap-1.5 text-xs text-gray-400">
-              <span>JD关联：</span>
+              <span>青云起航：</span>
               <GrowthStageBadge label={matchLabel} color="#2AC59D" />
             </div>
           </div>
@@ -619,7 +687,7 @@ export function Home() {
           </div>
           <div className="text-center">
             <div className="text-sm font-bold" style={{ color: '#12B898' }}>{matchLabel}</div>
-            <div className="text-xs text-gray-400">JD关联度</div>
+            <div className="text-xs text-gray-400">JD匹配度</div>
           </div>
         </div>
 

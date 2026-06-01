@@ -105,6 +105,7 @@ interface JourneySnapshot {
   user: AppUser;
   stages: Stage[];
   dailyTasks: DailyTask[];
+  dailyTaskOverrides: Record<string, { title: string; description: string }>;
   applications: Application[];
   interviewRecords: InterviewRecord[];
   questions: Question[];
@@ -142,14 +143,31 @@ function writeStoredWorkspace(workspace: PersistedWorkspace) {
 }
 
 function normalizeJourneySnapshot(snapshot: Partial<JourneySnapshot>): JourneySnapshot {
+  const normalizeResumeMaterial = (material: ResumeMaterial): ResumeMaterial => ({
+    ...material,
+    ...(material.position?.trim() ? {} : (() => {
+      const titleParts = material.title.includes('·')
+        ? material.title.split('·').map(part => part.trim()).filter(Boolean)
+        : [];
+
+      return titleParts.length > 1
+        ? { title: titleParts[0], position: titleParts[1] }
+        : {};
+    })()),
+    startDate: material.startDate ?? material.date,
+    endDate: material.endDate,
+    date: material.date,
+  });
+
   return {
     user: snapshot.user ?? initialUser,
     stages: snapshot.stages ?? initialStages,
     dailyTasks: snapshot.dailyTasks ?? initialDailyTasks,
+    dailyTaskOverrides: snapshot.dailyTaskOverrides ?? {},
     applications: snapshot.applications ?? initialApplications,
     interviewRecords: snapshot.interviewRecords ?? initialInterviewRecords,
     questions: snapshot.questions ?? initialQuestions,
-    resumeMaterials: snapshot.resumeMaterials ?? initialResumeMaterials,
+    resumeMaterials: (snapshot.resumeMaterials ?? initialResumeMaterials).map(normalizeResumeMaterial),
     resumeEntries: snapshot.resumeEntries ?? initialResumeEntries,
     achievements: snapshot.achievements ?? initialAchievements,
     xiaoYunMessage: snapshot.xiaoYunMessage ?? '今天也要加油哦！每一步都算数 ☁️',
@@ -166,6 +184,7 @@ function cloneSnapshot(snapshot: JourneySnapshot): JourneySnapshot {
       currentProgress: stage.currentProgress.map(item => ({ ...item })),
     })),
     dailyTasks: snapshot.dailyTasks.map(task => ({ ...task })),
+    dailyTaskOverrides: { ...snapshot.dailyTaskOverrides },
     applications: snapshot.applications.map(app => ({ ...app })),
     interviewRecords: snapshot.interviewRecords.map(record => ({
       ...record,
@@ -191,6 +210,7 @@ interface AppContextType {
   user: AppUser;
   stages: Stage[];
   dailyTasks: DailyTask[];
+  dailyTaskOverrides: Record<string, { title: string; description: string }>;
   applications: Application[];
   interviewRecords: InterviewRecord[];
   questions: Question[];
@@ -205,6 +225,7 @@ interface AppContextType {
   setShowXiaoYun: (val: boolean) => void;
   addApplication: (app: Application) => void;
   updateApplicationStatus: (id: string, status: Application['status']) => void;
+  editApplication: (id: string, updates: Partial<Pick<Application, 'location' | 'salary' | 'appliedDate' | 'company' | 'position' | 'companyColor' | 'resumeVersionId'>>) => void;
   toggleQuestion: (id: string) => void;
   updateUser: (updates: Partial<AppUser>) => void;
   updateStageProgress: (stageId: number, progressIndex: number, field: 'value' | 'total', newVal: number) => void;
@@ -216,6 +237,10 @@ interface AppContextType {
   savedAccounts: string[];
   loadAccount: (accountName: string) => boolean;
   resetCurrentAccount: () => void;
+  exportCurrentAccount: () => { fileName: string; content: string } | null;
+  updateDailyTaskOverride: (taskId: string, override: { title: string; description: string }) => void;
+  updateResumeMaterial: (index: number, updates: Partial<ResumeMaterial>) => void;
+  addResumeMaterial: (material: ResumeMaterial) => void;
 }
 
 export interface StagePlanItem {
@@ -251,6 +276,14 @@ function createStarterDailyTasks(): DailyTask[] {
       completed: false,
     },
   ];
+}
+
+function sanitizeFileName(name: string) {
+  return name
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '') || '账号';
 }
 
 function buildDailyTasksFromPlan(plan: StagePlanItem[]): DailyTask[] {
@@ -396,20 +429,63 @@ function buildResumeCardTitle(detail: string, index: number): string {
   return `${normalized.slice(0, 12)}…`;
 }
 
-function buildSeedResumeEntry(input: { fileName: string; resumeText: string; targetJob: string; targetCompany: string; }): ResumeEntry {
-  const bullets = normalizeResumeText(input.resumeText);
+function buildResumeMaterialFromApplication(app: Application): ResumeMaterial {
+  const statusLabels: Record<Application['status'], string> = {
+    applied: '已投递',
+    viewed: '已查看',
+    interview: '已面试',
+    offer: '已拿到offer',
+    rejected: '已结束',
+  };
+
+  const detail = `于 ${app.appliedDate} 向 ${app.company} 投递 ${app.position}，地点：${app.location}，薪资：${app.salary}。`;
+  return {
+    title: app.company,
+    position: app.position,
+    detail,
+    skills: [statusLabels[app.status]],
+    startDate: app.appliedDate,
+  };
+}
+
+function buildResumeMaterialPeriod(material: ResumeMaterial): string {
+  const start = material.startDate ?? material.date ?? '';
+  const end = material.endDate?.trim();
+
+  if (!start) return '';
+  return `${start} - ${end || '至今'}`;
+}
+
+function buildSeedResumeEntry(input: { fileName: string; resumeText: string; materials: ResumeMaterial[]; targetJob: string; targetCompany: string; }): ResumeEntry {
+  const materialBullets = input.materials
+    .slice(0, 6)
+    .map((material, index) => {
+      const positionText = material.position?.trim() ? ` · ${material.position.trim()}` : '';
+      const periodText = buildResumeMaterialPeriod(material);
+      const periodSuffix = periodText ? `（${periodText}）` : '';
+      return `${index + 1}. ${material.title}${positionText}${periodSuffix}：${material.detail}`;
+    });
+
+  const bullets = materialBullets.length > 0 ? materialBullets : normalizeResumeText(input.resumeText);
   const safeBullets = bullets.length > 0
     ? bullets
     : ['已完成 AI 简历分析，准备进入青云起航。', '上传的简历会作为初始版本保留。'];
 
+  const derivedSkills = Array.from(new Set([
+    ...input.materials.flatMap(material => material.skills),
+    ...buildResumeSkills(input.resumeText),
+  ])).slice(0, 6);
+
   return {
     id: 'v1',
-    company: '初始简历',
+    company: '阶段一简历',
     companyColor: '#F59E0B',
-    position: input.fileName ? `原始版 · ${input.fileName.replace(/\.[^.]+$/, '')}` : '原始版',
-    period: input.fileName ? `初始简历 · ${input.fileName}` : '初始简历',
+    position: input.fileName ? `阶段一版 · ${input.fileName.replace(/\.[^.]+$/, '')}` : '阶段一版',
+    period: input.materials.length > 0
+      ? `阶段一版 · ${buildResumeMaterialPeriod(input.materials[0]) || '待整理'}`
+      : '阶段一版',
     bullets: safeBullets,
-    skills: buildResumeSkills(input.resumeText),
+    skills: derivedSkills.length > 0 ? derivedSkills : buildResumeSkills(input.resumeText),
     stage: 1,
     isNew: false,
     sourceType: 'seed',
@@ -740,6 +816,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AppUser>(normalizedStoredSnapshot?.user ?? initialUser);
   const [stages, setStages] = useState<Stage[]>(normalizedStoredSnapshot?.stages ?? initialStages);
   const [dailyTasks, setDailyTasks] = useState<DailyTask[]>(normalizedStoredSnapshot?.dailyTasks ?? initialDailyTasks);
+  const [dailyTaskOverrides, setDailyTaskOverrides] = useState<Record<string, { title: string; description: string }>>(normalizedStoredSnapshot?.dailyTaskOverrides ?? {});
   const [applications, setApplications] = useState<Application[]>(normalizedStoredSnapshot?.applications ?? initialApplications);
   const [interviewRecords] = useState<InterviewRecord[]>(normalizedStoredSnapshot?.interviewRecords ?? initialInterviewRecords);
   const [questions, setQuestions] = useState<Question[]>(normalizedStoredSnapshot?.questions ?? initialQuestions);
@@ -770,6 +847,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setUser(normalizedSnapshot.user);
     setStages(normalizedSnapshot.stages);
     setDailyTasks(normalizedSnapshot.dailyTasks);
+    setDailyTaskOverrides(normalizedSnapshot.dailyTaskOverrides);
     setApplications(normalizedSnapshot.applications);
     setQuestions(normalizedSnapshot.questions);
     setResumeMaterials(normalizedSnapshot.resumeMaterials);
@@ -791,6 +869,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setUser(initialUser);
       setStages(initialStages);
       setDailyTasks(initialDailyTasks);
+      setDailyTaskOverrides({});
       setApplications(initialApplications);
       setQuestions(initialQuestions);
       setResumeMaterials(initialResumeMaterials);
@@ -814,6 +893,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setUser(initialUser);
     setStages(initialStages);
     setDailyTasks(initialDailyTasks);
+    setDailyTaskOverrides({});
     setApplications(initialApplications);
     setQuestions(initialQuestions);
     setResumeMaterials(initialResumeMaterials);
@@ -822,15 +902,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setShowXiaoYun(true);
   };
 
+  const exportCurrentAccount = () => {
+    const accountName = user.name.trim();
+    if (!accountName) return null;
+
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      accountName,
+      snapshot: cloneSnapshot({
+        user,
+        stages,
+        dailyTasks,
+        dailyTaskOverrides,
+        applications,
+        interviewRecords,
+        questions,
+        resumeMaterials,
+        resumeEntries,
+        achievements,
+        xiaoYunMessage,
+        showXiaoYun,
+      }),
+    };
+
+    return {
+      fileName: `青云路径-${sanitizeFileName(accountName)}.json`,
+      content: JSON.stringify(payload, null, 2),
+    };
+  };
+
   useEffect(() => {
     if (!user.hasSetup) return;
     const accountName = user.name.trim();
     if (!accountName) return;
-
     persistCurrentSnapshot(accountName, {
       user,
       stages,
       dailyTasks,
+      dailyTaskOverrides,
       applications,
       interviewRecords,
       questions,
@@ -840,7 +950,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       xiaoYunMessage,
       showXiaoYun,
     });
-  }, [user, stages, dailyTasks, applications, interviewRecords, questions, resumeMaterials, resumeEntries, achievements, xiaoYunMessage, showXiaoYun]);
+  }, [user, stages, dailyTasks, dailyTaskOverrides, applications, interviewRecords, questions, resumeMaterials, resumeEntries, achievements, xiaoYunMessage, showXiaoYun]);
 
   const completeTask = (taskId: string) => {
     setDailyTasks(prev => prev.map(t => {
@@ -857,23 +967,133 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const addApplication = (app: Application) => {
     setApplications(prev => [app, ...prev]);
+    setResumeMaterials(prev => [buildResumeMaterialFromApplication(app), ...prev]);
     setUser(u => ({ ...u, totalApplied: u.totalApplied + 1 }));
   };
 
   const updateApplicationStatus = (id: string, status: Application['status']) => {
     setApplications(prev => {
-      let updatedApp: Application | null = null;
+      let prevStatus: Application['status'] | null = null;
       const nextApplications = prev.map(a => {
         if (a.id !== id) return a;
-        updatedApp = { ...a, status };
-        return updatedApp;
+        prevStatus = a.status;
+        return { ...a, status };
       });
 
-      if (updatedApp) {
-        void updatedApp;
-      }
+      if (prevStatus === null) return prev;
+
+      // Update derived user metrics based on status transition
+      setUser(u => {
+        let totalInterviews = u.totalInterviews;
+        if (prevStatus !== 'interview' && status === 'interview') totalInterviews = u.totalInterviews + 1;
+        if (prevStatus === 'interview' && status !== 'interview') totalInterviews = Math.max(0, u.totalInterviews - 1);
+
+        return { ...u, totalInterviews };
+      });
 
       return nextApplications;
+    });
+  };
+
+  const editApplication = (id: string, updates: Partial<Pick<Application, 'location' | 'salary' | 'appliedDate' | 'company' | 'position' | 'companyColor' | 'resumeVersionId'>>) => {
+    setApplications(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+  };
+
+  const updateDailyTaskOverride = (taskId: string, override: { title: string; description: string }) => {
+    setDailyTaskOverrides(prev => {
+      const next = {
+        ...prev,
+        [taskId]: {
+          title: override.title.trim() || '未命名任务',
+          description: override.description.trim() || '暂无描述',
+        },
+      };
+
+      // Persist immediately if we have an account name
+      const accountName = user.name.trim();
+      if (accountName) {
+        try {
+          persistCurrentSnapshot(accountName, {
+            user,
+            stages,
+            dailyTasks,
+            dailyTaskOverrides: next,
+            applications,
+            interviewRecords,
+            questions,
+            resumeMaterials,
+            resumeEntries,
+            achievements,
+            xiaoYunMessage,
+            showXiaoYun,
+          });
+        } catch (e) {
+          // ignore persistence errors here
+        }
+      }
+
+      return next;
+    });
+  };
+
+  const updateResumeMaterial = (index: number, updates: Partial<ResumeMaterial>) => {
+    setResumeMaterials(prev => {
+      const next = prev.map((m, i) => i === index ? { ...m, ...updates } : m);
+
+      // persist immediately if we have an account name
+      const accountName = user.name.trim();
+      if (accountName) {
+        try {
+          persistCurrentSnapshot(accountName, {
+            user,
+            stages,
+            dailyTasks,
+            dailyTaskOverrides,
+            applications,
+            interviewRecords,
+            questions,
+            resumeMaterials: next,
+            resumeEntries,
+            achievements,
+            xiaoYunMessage,
+            showXiaoYun,
+          });
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      return next;
+    });
+  };
+
+  const addResumeMaterial = (material: ResumeMaterial) => {
+    setResumeMaterials(prev => {
+      const next = [material, ...prev];
+
+      const accountName = user.name.trim();
+      if (accountName) {
+        try {
+          persistCurrentSnapshot(accountName, {
+            user,
+            stages,
+            dailyTasks,
+            dailyTaskOverrides,
+            applications,
+            interviewRecords,
+            questions,
+            resumeMaterials: next,
+            resumeEntries,
+            achievements,
+            xiaoYunMessage,
+            showXiaoYun,
+          });
+        } catch {
+          // ignore
+        }
+      }
+
+      return next;
     });
   };
 
@@ -904,6 +1124,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       currentProgress: stage.currentProgress.map(item => ({ ...item, value: 0 })),
     })));
     setDailyTasks(buildDailyTasksFromProfile(nextUser));
+    setDailyTaskOverrides({});
     setApplications(buildApplicationsFromProfile(nextUser));
     setResumeMaterials(initialResumeMaterials);
     setResumeEntries(buildResumeEntriesFromProfile(nextUser));
@@ -929,12 +1150,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateStageProgress = (stageId: number, progressIndex: number, field: 'value' | 'total', newVal: number) => {
-    setStages(prev => prev.map(s => {
-      if (s.id !== stageId) return s;
-      const updated = [...s.currentProgress];
-      updated[progressIndex] = { ...updated[progressIndex], [field]: Math.max(0, newVal) };
-      return { ...s, currentProgress: updated };
-    }));
+    setStages(prev => {
+      const next = prev.map(s => {
+        if (s.id !== stageId) return s;
+        const updated = [...s.currentProgress];
+        updated[progressIndex] = { ...updated[progressIndex], [field]: Math.max(0, newVal) };
+
+        // compute progress and status from updated currentProgress
+        const ratios = updated.map(item => Math.min(1, item.total > 0 ? item.value / item.total : 0));
+        const progress = updated.length > 0 ? Math.round((ratios.reduce((sum, r) => sum + r, 0) / updated.length) * 100) : 0;
+        const status: Stage['status'] = progress >= 100 ? 'completed' : progress > 0 ? 'active' : 'locked';
+
+        return { ...s, currentProgress: updated, progress, status };
+      });
+
+      // update overall match score based on new stages
+      return next;
+    });
   };
 
   const applyPlan = (plan: StagePlanItem[]) => {
@@ -952,11 +1184,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       setUser(u => ({
         ...u,
-        matchScore: calculateOverallMatchScore(nextStages),
         hasSetup: true,
       }));
 
       setDailyTasks(buildDailyTasksFromPlan(plan));
+      setDailyTaskOverrides({});
       setApplications(prev => prev.map((app, index) => {
         const stage1 = nextStages[0]?.progress ?? 0;
         const stage2 = nextStages[1]?.progress ?? 0;
@@ -1013,18 +1245,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setResumeEntries(prev => prev.map(e => ({ ...e, isDefault: e.id === entryId })));
   };
 
+  const value: AppContextType = {
+    user,
+    stages,
+    dailyTasks,
+    dailyTaskOverrides,
+    applications,
+    interviewRecords,
+    questions,
+    resumeMaterials,
+    resumeEntries,
+    achievements,
+    xiaoYunMessage,
+    showXiaoYun,
+    completeTask,
+    setHasSetup,
+    setXiaoYunMessage,
+    setShowXiaoYun,
+    addApplication,
+    updateApplicationStatus,
+    editApplication,
+    toggleQuestion,
+    updateUser,
+    updateStageProgress,
+    initializeJourney,
+    applyPlan,
+    seedResumeLibrary,
+    generateResumeVersion,
+    setDefaultResumeVersion,
+    savedAccounts,
+    loadAccount,
+    resetCurrentAccount,
+    exportCurrentAccount,
+    updateDailyTaskOverride,
+    updateResumeMaterial,
+    addResumeMaterial,
+  };
+
   return (
-    <AppContext.Provider value={{
-      user, stages, dailyTasks, applications, interviewRecords, questions,
-      resumeMaterials, resumeEntries, achievements, xiaoYunMessage, showXiaoYun,
-      completeTask, setHasSetup, setXiaoYunMessage, setShowXiaoYun,
-      addApplication, updateApplicationStatus, toggleQuestion, updateUser, initializeJourney,
-      updateStageProgress, applyPlan,
-      seedResumeLibrary,
-      generateResumeVersion,
-      setDefaultResumeVersion,
-      savedAccounts, loadAccount, resetCurrentAccount,
-    }}>
+    <AppContext.Provider value={value}>
       {children}
     </AppContext.Provider>
   );
